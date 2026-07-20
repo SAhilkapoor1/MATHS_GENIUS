@@ -2,6 +2,9 @@ import time
 import random
 import math
 import os
+import sympy as sp
+from PIL import Image
+import pytesseract
 from threading import Thread
 import telebot
 from telebot import types
@@ -71,6 +74,122 @@ def update_leaderboard(user_name, time_taken):
     leaderboard = sorted(leaderboard, key=lambda x: x['time_taken'])[:5]
 
 
+# --- STEP-BY-STEP MATH SOLVER LOGIC (DETERMINISTIC) ---
+def process_math_step_by_step(query: str) -> str:
+    x, y, z = sp.symbols('x y z')
+    query = query.strip()
+    steps = []
+
+    # 1. Differentiation Step-by-Step
+    if "diff" in query or "d/dx" in query:
+        clean_expr = query.replace("diff", "").replace("d/dx", "").strip()
+        expr = sp.sympify(clean_expr)
+        steps.append(f"<b>Step 1: Given Expression</b>\n<code>f(x) = {expr}</code>")
+        
+        derivative = sp.diff(expr, x)
+        steps.append(f"<b>Step 2: Apply Differentiation Rules wrt (x)</b>\n<code>d/dx [{expr}]</code>")
+        steps.append(f"<b>Step 3: Final Computed Result</b>\n<code>{derivative}</code>")
+
+    # 2. Integration Step-by-Step
+    elif "integrate" in query or "∫" in query:
+        clean_expr = query.replace("integrate", "").replace("∫", "").strip()
+        expr = sp.sympify(clean_expr)
+        steps.append(f"<b>Step 1: Given Integral Function</b>\n<code>f(x) = {expr}</code>")
+        
+        integral = sp.integrate(expr, x)
+        steps.append(f"<b>Step 2: Apply Integration Formulas</b>\n<code>∫ ({expr}) dx</code>")
+        steps.append(f"<b>Step 3: Final Solution</b>\n<code>{integral} + C</code>")
+
+    # 3. Equation Solving Step-by-Step
+    elif "=" in query:
+        lhs_str, rhs_str = query.split("=")
+        lhs = sp.sympify(lhs_str)
+        rhs = sp.sympify(rhs_str)
+        eq = sp.Eq(lhs, rhs)
+        
+        steps.append(f"<b>Step 1: Formulate the Equation</b>\n<code>{eq}</code>")
+        
+        steps.append(f"<b>Step 2: Rearrange Terms to (LHS - RHS = 0)</b>\n<code>{lhs - rhs} = 0</code>")
+        
+        solutions = sp.solve(eq, x)
+        steps.append(f"<b>Step 3: Find Roots/Values for Variable 'x'</b>\n<code>x = {solutions}</code>")
+
+    else:
+        expr = sp.sympify(query)
+        steps.append(f"<b>Step 1: Original Expression</b>\n<code>{expr}</code>")
+        steps.append(f"<b>Step 2: Simplify Term Structures</b>\n<code>{sp.simplify(expr)}</code>")
+
+    return "\n\n".join(steps)
+
+
+# --- PHOTO HANDLER FEATURE ---
+@bot.message_handler(content_types=['photo'])
+def handle_photo_math(message):
+    chat_id = message.chat.id
+    status_msg = bot.send_message(chat_id, "🔍 <b>Scanning image for math equations...</b>", parse_mode='HTML')
+
+    try:
+        file_info = bot.get_file(message.photo[-1].file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        image_path = f"photo_{chat_id}.jpg"
+        with open(image_path, 'wb') as new_file:
+            new_file.write(downloaded_file)
+
+        image = Image.open(image_path)
+        extracted_text = pytesseract.image_to_string(image).strip()
+
+        if os.path.exists(image_path):
+            os.remove(image_path)
+
+        if not extracted_text:
+            bot.edit_message_text("❌ <b>Image text padhne mein dikkat aayi. Please clear photo bhejien.</b>", chat_id, status_msg.message_id, parse_mode='HTML')
+            return
+
+        solution_steps = process_math_step_by_step(extracted_text)
+        
+        output_text = (
+            f"📷 <b>Extracted Query:</b> <code>{extracted_text}</code>\n\n"
+            f"📑 <b>STEP-BY-STEP SOLUTION:</b>\n"
+            f"=====================================\n\n"
+            f"{solution_steps}\n\n"
+            f"====================================="
+        )
+        bot.edit_message_text(output_text, chat_id, status_msg.message_id, parse_mode='HTML')
+
+    except Exception as e:
+        bot.edit_message_text(f"❌ <b>Processing Error:</b>\n<code>{str(e)}</code>", chat_id, status_msg.message_id, parse_mode='HTML')
+
+
+# --- ADVANCED MATH SOLVER COMMAND ---
+@bot.message_handler(commands=['solve'])
+def solve_math_command(message):
+    chat_id = message.chat.id
+    query = message.text.replace('/solve', '').strip()
+
+    if not query:
+        usage_text = (
+            "📐 <b>ADVANCED MATH SOLVER (Step-by-Step Engine)</b>\n"
+            "=====================================\n"
+            "Aap niche diye tarike se question puch sakte hain:\n\n"
+            "1️⃣ <b>Text Format:</b>\n"
+            "• Equation: <code>/solve x**2 - 5*x + 6 = 0</code>\n"
+            "• Derivative: <code>/solve diff x**3 + 4*x</code>\n"
+            "• Integral: <code>/solve integrate cos(x)</code>\n\n"
+            "2️⃣ <b>Photo Format:</b>\n"
+            "• Directly bot ko math question ki **Photo** bhej dein!\n"
+            "====================================="
+        )
+        bot.send_message(chat_id, usage_text, parse_mode='HTML')
+        return
+
+    try:
+        solution_steps = process_math_step_by_step(query)
+        bot.send_message(chat_id, f"📑 <b>STEP-BY-STEP SOLUTION:</b>\n\n{solution_steps}", parse_mode='HTML')
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ <b>Math Engine Error:</b>\n<code>{str(e)}</code>", parse_mode='HTML')
+
+
 @bot.message_handler(commands=['players'])
 def show_active_players(message):
     chat_id = message.chat.id
@@ -110,23 +229,28 @@ def show_leaderboard(message):
     bot.send_message(chat_id, leaderboard_text, parse_mode='HTML')
 
 
+# --- UPDATED WELCOME COMMAND WITH 2ND OPTION ---
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     chat_id = message.chat.id
     welcome_text = (
         "<b>+================================+</b>\n"
-        "<b>| Welcome to my game, muggle!    |</b>\n"
-        "<b>| Enter an integer number        |</b>\n"
-        "<b>| and guess what number I've     |</b>\n"
-        "<b>| picked for you.                |</b>\n"
-        "<b>| So, what is the secret number? |</b>\n"
+        "<b>|    WELCOME TO MATH & GAME BOT   |</b>\n"
         "<b>+================================+</b>\n\n"
-        "🔥 Now the number can be of <b>ANY digits</b>! Advanced math logic applies.\n"
-        "📊 /leaderboard | 🔍 /players"
+        "Aap is bot se 2 cheezein kar sakte hain:\n\n"
+        "🎮 <b>1. Number Guessing Game:</b>\n"
+        "Secret integer number guess kijiye math hints ki madad se!\n\n"
+        "🧮 <b>2. Math Question Solver (Step-by-Step):</b>\n"
+        "Aap advanced math question ka step-by-step solution pa sakte hain:\n"
+        "• <b>Text dwara:</b> Write <code>/solve [question]</code>\n"
+        "• <b>Photo dwara:</b> Direct question ki photo bhej dein!\n\n"
+        "====================================\n"
+        "📊 /leaderboard | 🔍 /players | 🧮 /solve"
     )
-    markup = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
+    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     start_btn = types.KeyboardButton("🎮 Start Game")
-    markup.add(start_btn)
+    solve_btn = types.KeyboardButton("/solve")
+    markup.add(start_btn, solve_btn)
     bot.send_message(chat_id, welcome_text, parse_mode='HTML', reply_markup=markup)
 
 
@@ -170,7 +294,7 @@ def start_game(message):
 def handle_guess(message):
     chat_id = message.chat.id
     if chat_id not in user_sessions or not user_sessions[chat_id]['game_active']:
-        bot.reply_to(message, "❌ Please click on /start to begin the game!")
+        bot.reply_to(message, "❌ Please click on /start to begin or /solve to ask a math question!")
         return
 
     session = user_sessions[chat_id]
@@ -184,7 +308,7 @@ def handle_guess(message):
     try:
         user_guess = int(message.text)
     except ValueError:
-        bot.reply_to(message, "🔢 Please enter a valid integer number.")
+        bot.reply_to(message, "🔢 Please enter a valid integer number or use /solve for equations.")
         return
 
     user_name = session['user_name']
@@ -216,18 +340,15 @@ def handle_guess(message):
             f"⏰ <b>Remaining Time:</b> {remaining_time} seconds"
         )
         bot.reply_to(message, loop_text, parse_mode='HTML')
-        
-# --- UPDATE THIS BOTTOM PART IN YOUR CODE ---
+
 
 def keep_alive():
     t = Thread(target=run_flask)
-    t.daemon = True  # Application exit hone par thread apne aap close ho jaye
+    t.daemon = True
     t.start()
 
-# Server start immediately when script runs
 keep_alive()
 
-print("Your Advanced Math Bot is running 24/7...")
+print("Your Advanced Math & Game Bot is running 24/7...")
 
-# Infinity Polling with error handling so it doesn't crash on network timeouts
 bot.infinity_polling(timeout=10, long_polling_timeout=5)
