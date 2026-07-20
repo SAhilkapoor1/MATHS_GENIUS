@@ -19,8 +19,13 @@ def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# Aapka Telegram Bot Token
-BOT_TOKEN = "8919860591:AAFHKSvSODDmvQL78atOOgulzzLxDnAy3wM"
+# Render ke Environment Variables se token padhega
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+# Agar token nahi mila toh error dikhayega
+if not BOT_TOKEN:
+    raise ValueError("ERROR: BOT_TOKEN Environment Variable nahi mila!")
+
 bot = telebot.TeleBot(BOT_TOKEN)
 
 time_limit = 200  # 200 seconds
@@ -211,11 +216,18 @@ def handle_guess(message):
             f"⏰ <b>Remaining Time:</b> {remaining_time} seconds"
         )
         bot.reply_to(message, loop_text, parse_mode='HTML')
+        
+# --- UPDATE THIS BOTTOM PART IN YOUR CODE ---
 
-if __name__ == "__main__":
-    # Flask ko alag thread mein chalayenge taaki polling block na ho
+def keep_alive():
     t = Thread(target=run_flask)
+    t.daemon = True  # Application exit hone par thread apne aap close ho jaye
     t.start()
-    
-    print("Your Advanced Math Bot is running 24/7...")
-    bot.infinity_polling()
+
+# Server start immediately when script runs
+keep_alive()
+
+print("Your Advanced Math Bot is running 24/7...")
+
+# Infinity Polling with error handling so it doesn't crash on network timeouts
+bot.infinity_polling(timeout=10, long_polling_timeout=5)
