@@ -1,5 +1,3 @@
 pyTelegramBotAPI
 Flask
-sympy
-pillow
-pytesseract
+gunicorn
